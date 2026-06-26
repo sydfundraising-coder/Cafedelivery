@@ -168,7 +168,7 @@
   // ── CONFIG ──────────────────────────────────────────────────────────
   // Replace YOUR_API_KEY_HERE with your Anthropic API key
   // Get one at https://console.anthropic.com
-  const ANTHROPIC_API_KEY = "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";
+  const ANTHROPIC_API_KEY = "YOUR_API_KEY_HERE";
 
   // ── DATA ────────────────────────────────────────────────────────────
   const SAMPLE = [
@@ -381,15 +381,12 @@
 
       const resp = await fetch("https://cafe-proxy.onrender.com/scan", {
         method: "POST",
-        headers: { "Content-Type":"application/json", 
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6", max_tokens: 1000,
-          messages: [{ role:"user", content:[
-            contentItem,
-            { type:"text", text:`Extract delivery/invoice details and return ONLY valid JSON, no markdown:
+        headers: { "Content-Type":"application/json" },
+        body: JSON.stringify({ content:[
+          contentItem,
+          { type:"text", text:`Extract delivery/invoice details and return ONLY valid JSON, no markdown:
 {"supplier":"","date":"YYYY-MM-DD","invoiceNo":"","amount":0,"items":[{"desc":"","qty":0,"unit":"kg"}],"notes":""}` }
-          ]}]
-        })
+        ]})
       });
       const data = await resp.json();
       const text = data.content?.find(c => c.type==="text")?.text || "";
