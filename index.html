@@ -362,10 +362,9 @@
   async function handleScan(e) {
     const file = e.target.files[0];
     if (!file) return;
-    const btn = document.getElementById("scan-btn");
     const msg = document.getElementById("scan-msg");
-    btn.disabled = true; btn.textContent = "Scanning…";
     msg.textContent = "Reading your document…"; msg.className = "scan-msg";
+    console.log("Step 1: file type =", file.type, "size =", file.size);
     try {
       const b64 = await new Promise((res, rej) => {
         const reader = new FileReader();
@@ -373,11 +372,12 @@
         reader.onerror = rej;
         reader.readAsDataURL(file);
       });
+      console.log("Step 2: file read OK, sending to proxy…");
       msg.textContent = "Extracting delivery details…";
       const isImg = file.type.startsWith("image/");
       const contentItem = isImg
-        ? { type:"image",    source:{ type:"base64", media_type:file.type,            data:b64 } }
-        : { type:"document", source:{ type:"base64", media_type:"application/pdf",    data:b64 } };
+        ? { type:"image",    source:{ type:"base64", media_type:file.type,         data:b64 } }
+        : { type:"document", source:{ type:"base64", media_type:"application/pdf", data:b64 } };
 
       const resp = await fetch("https://cafe-proxy.onrender.com/scan", {
         method: "POST",
@@ -388,16 +388,19 @@
 {"supplier":"","date":"YYYY-MM-DD","invoiceNo":"","amount":0,"items":[{"desc":"","qty":0,"unit":"kg"}],"notes":""}` }
         ]})
       });
+      console.log("Step 3: proxy responded, status =", resp.status);
       const data = await resp.json();
+      console.log("Step 4: response data =", JSON.stringify(data));
       const text = data.content?.find(c => c.type==="text")?.text || "";
       const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+      console.log("Step 5: parsed =", parsed);
 
-      if (parsed.supplier)  document.getElementById("f-supplier").value  = parsed.supplier;
-      if (parsed.date)      document.getElementById("f-date").value      = parsed.date;
-      if (parsed.invoiceNo) document.getElementById("f-invoiceno").value = parsed.invoiceNo;
-      if (parsed.amount > 0) document.getElementById("f-amount").value   = parsed.amount;
-      if (parsed.notes)     document.getElementById("f-notes").value     = parsed.notes;
-      if (parsed.invoiceNo) document.getElementById("f-matched").checked = true;
+      if (parsed.supplier)   document.getElementById("f-supplier").value  = parsed.supplier;
+      if (parsed.date)       document.getElementById("f-date").value      = parsed.date;
+      if (parsed.invoiceNo)  document.getElementById("f-invoiceno").value = parsed.invoiceNo;
+      if (parsed.amount > 0) document.getElementById("f-amount").value    = parsed.amount;
+      if (parsed.notes)      document.getElementById("f-notes").value     = parsed.notes;
+      if (parsed.invoiceNo)  document.getElementById("f-matched").checked = true;
       if (parsed.items?.length > 0) {
         document.getElementById("items-container").innerHTML = "";
         itemCount = 0;
@@ -406,9 +409,9 @@
       msg.textContent = "✓ Details filled in — please check and correct if needed";
       msg.className = "scan-msg ok";
     } catch(err) {
+      console.log("ERROR:", err.message, err.stack);
       msg.textContent = "Could not read the document. Please fill in manually.";
     }
-    btn.disabled = false; btn.textContent = "Choose file";
     e.target.value = "";
   }
 
