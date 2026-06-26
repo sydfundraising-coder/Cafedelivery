@@ -100,8 +100,8 @@
       <div class="icon">📷</div>
       <h3>Scan docket or invoice</h3>
       <p>Upload a photo or PDF — AI will fill in the form for you</p>
-      <input type="file" id="scan-file" accept="image/*,application/pdf" style="display:none" onchange="handleScan(event)">
-      <button class="btn btn-primary" onclick="document.getElementById('scan-file').click()" id="scan-btn">Choose file</button>
+      <input type="file" id="scan-file" accept="image/*,application/pdf" style="display:none">
+      <button class="btn btn-primary" id="scan-btn">Choose file</button>
       <div class="scan-msg" id="scan-msg"></div>
     </div>
 
@@ -411,6 +411,21 @@
     btn.disabled = false; btn.textContent = "Choose file";
     e.target.value = "";
   }
+
+  // ── FILE INPUT FIX FOR EDGE ───────────────────────────────────────────
+  const scanFileInput = document.getElementById("scan-file");
+  const scanBtn = document.getElementById("scan-btn");
+
+  scanBtn.addEventListener("click", function() {
+    scanFileInput.value = "";
+    scanFileInput.click();
+  });
+
+  scanFileInput.addEventListener("change", function() {
+    if (this.files && this.files.length > 0) {
+      handleScan({ target: this });
+    }
+  });
 
   // ── INIT ──────────────────────────────────────────────────────────────
   showList();
