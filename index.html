@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Café Delivery Tracker</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f5f0; color: #1a1a18; min-height: 100vh; }
+    input, select, textarea { width: 100%; padding: 8px 10px; border: 1px solid #d3d1c7; border-radius: 6px; font-size: 14px; font-family: inherit; background: #fff; color: #1a1a18; outline: none; }
+    input:focus, select:focus { border-color: #378add; box-shadow: 0 0 0 2px rgba(55,138,221,0.15); }
+    button { font-family: inherit; cursor: pointer; border-radius: 6px; font-size: 14px; padding: 8px 16px; border: 1px solid #d3d1c7; background: #fff; color: #1a1a18; transition: background 0.15s; }
+    button:hover { background: #f1efe8; }
+    button:disabled { opacity: 0.5; cursor: default; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 8px 0; }
+    th { color: #888780; font-weight: 500; font-size: 13px; border-bottom: 1px solid #e0dfd8; }
+    td { border-bottom: 1px solid #f0efe8; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    // ── CONFIG ──────────────────────────────────────────────────────────────
+    // Replace this with your Anthropic API key for the AI scan feature.
+    // Get one at https://console.anthropic.com
+    // IMPORTANT: for a real deployment, move this to a backend proxy so your
+    // key is never exposed in the browser.
+    const ANTHROPIC_API_KEY = "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";
+
+    const SUPPLIERS = ["Fresh Farms","Metro Dairy","Oz Meats","Pacific Seafood","Bean & Grain","Sunrise Bakery","Other"];
+
+    const SAMPLE = [
+      { id:"GRN-001", supplier:"Fresh Farms", date:"2026-06-20", invoiceNo:"FF-441", amount:185.50, items:[{desc:"Tomatoes 10kg",qty:10,unit:"kg"},{desc:"Lettuce",qty:20,unit:"head"}], condition:"OK", notes:"", receivedBy:"Priya", matched:true },
+      { id:"GRN-002", supplier:"Metro Dairy", date:"2026-06-22", invoiceNo:"MD-8821", amount:347.00, items:[{desc:"Full Cream Milk",qty:50,unit:"L"},{desc:"Cheese 2kg",qty:5,unit:"block"}], condition:"OK", notes:"", receivedBy:"James", matched:true },
+      { id:"GRN-003", supplier:"Pacific Seafood", date:"2026-06-25", invoiceNo:"", amount:0, items:[{desc:"Atlantic Salmon",qty:6,unit:"kg"}], condition:"Damaged", notes:"2 packs torn packaging", receivedBy:"Priya", matched:false },
+    ];
+
+    // ── STORAGE (localStorage for real deployment) ───────────────────────
+    const storage = {
+      get: (key) => { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch { return null; } },
+      set: (key, val) => { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} },
+    };
+
+    // ── BADGE ────────────────────────────────────────────────────────────
+    const BADGE_COLORS = {
+      green:  ["#EAF3DE","#3B6D11","#97C459"],
+      amber:  ["#FAEEDA","#854F0B","#EF9F27"],
+      red:    ["#FCEBEB","#A32D2D","#F09595"],
+      blue:   ["#E6F1FB","#185FA5","#85B7EB"],
+      gray:   ["#F1EFE8","#5F5E5A","#B4B2A9"],
+    };
+    function Badge({ text, color }) {
+      const [bg, fg, bd] = BADGE_COLORS[color] || BADGE_COLORS.gray;
+      return <span style={{ background:bg, color:fg, border:`1px solid ${bd}`, borderRadius:6, fontSize:12, padding:"2px 8px", fontWeight:500, whiteSpace:"nowrap" }}>{text}</span>;
+    }
+
+    // ── APP ──────────────────────────────────────────────────────────────
+    function App() {
+      const [records, setRecords]       = useState(() => storage.get("cafe:records") || SAMPLE);
+      const [view, setView]             = useState("list");
+      const [selected, setSelected]     = useState(null);
+      const [search, setSearch]         = useState("");
+      const [filterStatus, setFilter]   = useState("All");
+
+      const save = (data) => { storage.set("cafe:records", data); };
+
+      const updateRecords = (fn) => {
+        setRecords(prev => {
+          const next = typeof fn === "function" ? fn(prev) : fn;
+          save(next);
+          return next;
+        });
+      };
+
+      const addRecord = (rec) => {
+        const id = `GRN-${String(records.length + 1).padStart(3, "0")}`;
+        updateRecords(r => [...r, { ...rec, id, createdAt: new Date().toISOString().slice(0,10) }]);
+        setView("list");
+      };
+
+      const toggleMatch  = (id) => updateRecords(r => r.map(x => x.id === id ? { ...x, matched: !x.matched } : x));
+      const deleteRecord = (id) => { updateRecords(r => r.filter(x => x.id !== id)); setView("list"); };
+
+      const filtered = records.filter(r => {
+        const q = search.toLowerCase();
+        const okText   = !q || r.supplier.toLowerCase().includes(q) || r.id.toLowerCase().includes(q) || (r.invoiceNo||"").toLowerCase().includes(q);
+        const okStatus = filterStatus === "All"
+          || (filterStatus === "Matched"   && r.matched)
+          || (filterStatus === "Unmatched" && !r.matched)
+          || (filterStatus === "Damaged"   && r.condition === "Damaged");
+        return okText && okStatus;
+      });
+
+      const unmatched = records.filter(r => !r.matched).length;
+      const damaged   = records.filter(r => r.condition === "Damaged").length;
+
+      return (
+        <div style={{ fontFamily:"inherit", minHeight:"100vh", background:"#f5f5f0" }}>
+          {/* NAV */}
+          <div style={{ background:"#fff", borderBottom:"1px solid #e0dfd8", padding:"0 20px", display:"flex", alignItems:"center", height:52, gap:12, position:"sticky", top:0, zIndex:10 }}>
+            <span style={{ fontWeight:600, fontSize:15 }}>☕ Delivery Tracker</span>
+            <div style={{ flex:1 }} />
+            {view === "list"
+              ? <button onClick={() => setView("new")} style={{ background:"#185FA5", color:"#fff", border:"none", fontWeight:500 }}>+ Log delivery</button>
+              : <button onClick={() => setView("list")} style={{ color:"#185FA5", background:"none", border:"none", padding:0, fontWeight:500 }}>← Back</button>
+            }
+          </div>
+
+          <div style={{ maxWidth:820, margin:"0 auto", padding:"20px 16px" }}>
+
+            {/* LIST */}
+            {view === "list" && <>
+              {/* Summary cards */}
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:10, marginBottom:20 }}>
+                {[
+                  { label:"Total deliveries", value:records.length,   color:"#185FA5" },
+                  { label:"Invoice pending",   value:unmatched,        color:"#854F0B" },
+                  { label:"Damaged goods",     value:damaged,          color:"#A32D2D" },
+                ].map(c => (
+                  <div key={c.label} style={{ background:"#fff", border:"1px solid #e0dfd8", borderRadius:12, padding:"14px 16px" }}>
+                    <div style={{ fontSize:12, color:"#888780", marginBottom:4 }}>{c.label}</div>
+                    <div style={{ fontSize:26, fontWeight:600, color:c.color }}>{c.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Search + filter */}
+              <div style={{ display:"flex", gap:10, marginBottom:14 }}>
+                <input placeholder="Search supplier, GRN, invoice…" value={search} onChange={e => setSearch(e.target.value)} />
+                <select value={filterStatus} onChange={e => setFilter(e.target.value)} style={{ width:"auto", minWidth:130 }}>
+                  {["All","Matched","Unmatched","Damaged"].map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+
+              {/* Records */}
+              {filtered.length === 0 && <div style={{ textAlign:"center", padding:40, color:"#888780", fontSize:14 }}>No deliveries found</div>}
+              <div style={{ display:"grid", gap:8 }}>
+                {filtered.slice().reverse().map(r => (
+                  <div key={r.id} onClick={() => { setSelected(r); setView("detail"); }}
+                    style={{ background:"#fff", border:"1px solid #e0dfd8", borderRadius:12, padding:"14px 16px", cursor:"pointer", display:"flex", gap:12, alignItems:"center" }}>
+                    <div style={{ flex:1 }}>
+                      <div style={{ display:"flex", gap:8, alignItems:"center", marginBottom:4, flexWrap:"wrap" }}>
+                        <span style={{ fontWeight:600, fontSize:14 }}>{r.supplier}</span>
+                        <span style={{ fontSize:12, color:"#888780" }}>{r.id}</span>
+                        {r.condition === "Damaged" && <Badge text="Damaged" color="red" />}
+                      </div>
+                      <div style={{ fontSize:13, color:"#888780" }}>
+                        {r.date} · {r.items.length} item{r.items.length !== 1 ? "s" : ""}
+                        {r.invoiceNo ? ` · Inv: ${r.invoiceNo}` : ""}
+                        {r.amount > 0 ? ` · $${r.amount.toFixed(2)}` : ""}
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:6, alignItems:"center" }}>
+                      {r.matched ? <Badge text="Invoice ✓" color="green" /> : <Badge text="No invoice" color="amber" />}
+                      <span style={{ color:"#b4b2a9", fontSize:20 }}>›</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </>}
+
+            {/* NEW */}
+            {view === "new" && <NewDelivery onSave={addRecord} onCancel={() => setView("list")} existingCount={records.length} />}
+
+            {/* DETAIL */}
+            {view === "detail" && selected && (
+              <DetailView
+                record={records.find(r => r.id === selected.id) || selected}
+                onToggleMatch={() => toggleMatch(selected.id)}
+                onDelete={() => deleteRecord(selected.id)}
+              />
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    // ── NEW DELIVERY FORM ─────────────────────────────────────────────────
+    function NewDelivery({ onSave, onCancel, existingCount }) {
+      const [scanning, setScanning] = useState(false);
+      const [scanMsg,  setScanMsg]  = useState("");
+      const fileRef = useRef();
+      const [form, setForm] = useState({
+        supplier:"", date: new Date().toISOString().slice(0,10),
+        invoiceNo:"", amount:"",
+        items:[{ desc:"", qty:"", unit:"kg" }],
+        condition:"OK", notes:"", receivedBy:"", matched:false,
+      });
+
+      const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
+      const updateItem  = (i, k, v) => setForm(f => { const items=[...f.items]; items[i]={...items[i],[k]:v}; return {...f,items}; });
+      const addItem     = () => setForm(f => ({ ...f, items:[...f.items,{desc:"",qty:"",unit:"kg"}] }));
+      const removeItem  = (i) => setForm(f => ({ ...f, items:f.items.filter((_,idx)=>idx!==i) }));
+
+      const handleScan = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        setScanning(true); setScanMsg("Reading your document…");
+        try {
+          const b64 = await new Promise((res, rej) => {
+            const reader = new FileReader();
+            reader.onload = () => res(reader.result.split(",")[1]);
+            reader.onerror = rej;
+            reader.readAsDataURL(file);
+          });
+          setScanMsg("Extracting delivery details…");
+          const isImg = file.type.startsWith("image/");
+          const contentItem = isImg
+            ? { type:"image",    source:{ type:"base64", media_type:file.type,              data:b64 } }
+            : { type:"document", source:{ type:"base64", media_type:"application/pdf",       data:b64 } };
+
+          const resp = await fetch("https://api.anthropic.com/v1/messages", {
+            method:"POST",
+            headers:{ "Content-Type":"application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version":"2023-06-01" },
+            body: JSON.stringify({
+              model:"claude-sonnet-4-6", max_tokens:1000,
+              messages:[{ role:"user", content:[
+                contentItem,
+                { type:"text", text:`Extract delivery/invoice details and return ONLY valid JSON, no markdown:
+{"supplier":"","date":"YYYY-MM-DD","invoiceNo":"","amount":0,"items":[{"desc":"","qty":0,"unit":"kg"}],"notes":""}` }
+              ]}]
+            })
+          });
+          const data = await resp.json();
+          const text = data.content?.find(c => c.type==="text")?.text || "";
+          const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+          setForm(f => ({
+            ...f,
+            supplier:  parsed.supplier  || f.supplier,
+            date:      parsed.date      || f.date,
+            invoiceNo: parsed.invoiceNo || f.invoiceNo,
+            amount:    parsed.amount > 0 ? String(parsed.amount) : f.amount,
+            items:     parsed.items?.length > 0 ? parsed.items.map(it=>({desc:it.desc||"",qty:it.qty||"",unit:it.unit||"kg"})) : f.items,
+            notes:     parsed.notes     || f.notes,
+            matched:   !!(parsed.invoiceNo),
+          }));
+          setScanMsg("✓ Details filled in — please check and correct if needed");
+        } catch { setScanMsg("Could not read the document. Please fill in manually."); }
+        setScanning(false); e.target.value="";
+      };
+
+      const submit = () => {
+        if (!form.supplier) return alert("Please enter a supplier name.");
+        if (!form.items.some(it => it.desc)) return alert("Add at least one item.");
+        onSave({ ...form, amount:parseFloat(form.amount)||0, items:form.items.filter(it=>it.desc) });
+      };
+
+      return (
+        <div>
+          <h2 style={{ fontSize:18, fontWeight:600, marginBottom:4 }}>Log delivery</h2>
+          <p style={{ fontSize:14, color:"#888780", marginBottom:16 }}>Upload a docket or invoice photo to auto-fill, or enter manually.</p>
+
+          {/* Scan zone */}
+          <div style={{ background:"#fff", border:"2px dashed #d3d1c7", borderRadius:12, padding:20, marginBottom:20, textAlign:"center" }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>📷</div>
+            <div style={{ fontSize:14, fontWeight:600, marginBottom:4 }}>Scan docket or invoice</div>
+            <div style={{ fontSize:13, color:"#888780", marginBottom:14 }}>Upload a photo or PDF — AI will fill in the form for you</div>
+            <input ref={fileRef} type="file" accept="image/*,application/pdf" onChange={handleScan} style={{ display:"none" }} />
+            <button onClick={() => fileRef.current.click()} disabled={scanning}
+              style={{ background: scanning?"#f5f5f0":"#185FA5", color:scanning?"#888780":"#fff", border:"none", fontWeight:500, padding:"9px 22px" }}>
+              {scanning ? "Scanning…" : "Choose file"}
+            </button>
+            {scanMsg && <div style={{ marginTop:12, fontSize:13, color:scanMsg.startsWith("✓")?"#3B6D11":"#888780" }}>{scanMsg}</div>}
+          </div>
+
+          {/* Form fields */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:12 }}>
+            <label style={{ fontSize:13 }}>Supplier *
+              <input list="sup-list" value={form.supplier} onChange={e=>set("supplier",e.target.value)} placeholder="Type or select" style={{ marginTop:4 }} />
+              <datalist id="sup-list">{SUPPLIERS.map(s=><option key={s} value={s}/>)}</datalist>
+            </label>
+            <label style={{ fontSize:13 }}>Delivery date *
+              <input type="date" value={form.date} onChange={e=>set("date",e.target.value)} style={{ marginTop:4 }} />
+            </label>
+            <label style={{ fontSize:13 }}>Invoice / docket No.
+              <input value={form.invoiceNo} onChange={e=>set("invoiceNo",e.target.value)} placeholder="e.g. FF-2026-441" style={{ marginTop:4 }} />
+            </label>
+            <label style={{ fontSize:13 }}>Invoice amount ($)
+              <input type="number" value={form.amount} onChange={e=>set("amount",e.target.value)} placeholder="0.00" style={{ marginTop:4 }} />
+            </label>
+            <label style={{ fontSize:13 }}>Received by
+              <input value={form.receivedBy} onChange={e=>set("receivedBy",e.target.value)} placeholder="Your name" style={{ marginTop:4 }} />
+            </label>
+            <label style={{ fontSize:13 }}>Condition
+              <select value={form.condition} onChange={e=>set("condition",e.target.value)} style={{ marginTop:4 }}>
+                <option>OK</option><option>Damaged</option>
+              </select>
+            </label>
+          </div>
+
+          {/* Items */}
+          <div style={{ marginBottom:12 }}>
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>Items received *</div>
+            {form.items.map((item,i)=>(
+              <div key={i} style={{ display:"grid", gridTemplateColumns:"2fr 80px 90px 32px", gap:8, marginBottom:8, alignItems:"center" }}>
+                <input placeholder="Item description" value={item.desc} onChange={e=>updateItem(i,"desc",e.target.value)} />
+                <input placeholder="Qty" type="number" value={item.qty} onChange={e=>updateItem(i,"qty",e.target.value)} />
+                <select value={item.unit} onChange={e=>updateItem(i,"unit",e.target.value)}>
+                  {["kg","g","L","ml","unit","box","head","block","bag","ctn"].map(u=><option key={u}>{u}</option>)}
+                </select>
+                <button onClick={()=>removeItem(i)} style={{ background:"none", border:"none", color:"#b4b2a9", fontSize:18, padding:0 }}>✕</button>
+              </div>
+            ))}
+            <button onClick={addItem} style={{ fontSize:13, color:"#185FA5", background:"none", border:"none", padding:0, fontWeight:500 }}>+ Add item</button>
+          </div>
+
+          <label style={{ fontSize:13, display:"block", marginBottom:14 }}>Notes (optional)
+            <input value={form.notes} onChange={e=>set("notes",e.target.value)} placeholder="e.g. short-dated, missing items, driver name" style={{ marginTop:4 }} />
+          </label>
+
+          <label style={{ fontSize:13, display:"flex", alignItems:"center", gap:8, marginBottom:20, cursor:"pointer" }}>
+            <input type="checkbox" checked={form.matched} onChange={e=>set("matched",e.target.checked)} style={{ width:"auto" }} />
+            Invoice received with this delivery
+          </label>
+
+          <div style={{ display:"flex", gap:10 }}>
+            <button onClick={submit} style={{ background:"#185FA5", color:"#fff", border:"none", fontWeight:500, padding:"9px 22px" }}>Save delivery</button>
+            <button onClick={onCancel}>Cancel</button>
+          </div>
+        </div>
+      );
+    }
+
+    // ── DETAIL VIEW ───────────────────────────────────────────────────────
+    function DetailView({ record, onToggleMatch, onDelete }) {
+      return (
+        <div style={{ background:"#fff", border:"1px solid #e0dfd8", borderRadius:12, padding:20 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+            <div>
+              <div style={{ fontWeight:600, fontSize:17, marginBottom:4 }}>{record.supplier}</div>
+              <div style={{ fontSize:13, color:"#888780" }}>{record.id} · {record.date}</div>
+            </div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap", justifyContent:"flex-end" }}>
+              {record.condition==="Damaged" && <Badge text="Damaged" color="red" />}
+              {record.matched ? <Badge text="Invoice ✓" color="green" /> : <Badge text="No invoice" color="amber" />}
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:16, fontSize:13 }}>
+            {[
+              ["Invoice No.",  record.invoiceNo || "—"],
+              ["Amount",       record.amount > 0 ? `$${record.amount.toFixed(2)}` : "—"],
+              ["Received by",  record.receivedBy || "—"],
+              ["Condition",    record.condition],
+            ].map(([label,val])=>(
+              <div key={label}>
+                <div style={{ color:"#888780", marginBottom:2 }}>{label}</div>
+                <div style={{ fontWeight:600 }}>{val}</div>
+              </div>
+            ))}
+          </div>
+
+          {record.notes && (
+            <div style={{ background:"#f5f5f0", border:"1px solid #e0dfd8", borderRadius:8, padding:"10px 14px", fontSize:13, marginBottom:16 }}>
+              <span style={{ color:"#888780" }}>Notes: </span>{record.notes}
+            </div>
+          )}
+
+          <div style={{ marginBottom:20 }}>
+            <div style={{ fontSize:13, fontWeight:600, marginBottom:8 }}>Items</div>
+            <table>
+              <thead><tr><th>Description</th><th>Qty</th><th>Unit</th></tr></thead>
+              <tbody>{record.items.map((it,i)=>(
+                <tr key={i}><td>{it.desc}</td><td>{it.qty}</td><td>{it.unit}</td></tr>
+              ))}</tbody>
+            </table>
+          </div>
+
+          <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
+            <button onClick={onToggleMatch}
+              style={{ background: record.matched?"#FAEEDA":"#EAF3DE", color:record.matched?"#854F0B":"#3B6D11", border:`1px solid ${record.matched?"#EF9F27":"#97C459"}` }}>
+              {record.matched ? "Mark invoice missing" : "Mark invoice received"}
+            </button>
+            <button onClick={()=>{ if(confirm("Delete this delivery record?")) onDelete(); }}
+              style={{ background:"#FCEBEB", color:"#A32D2D", border:"1px solid #F09595" }}>
+              Delete record
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+  </script>
+</body>
+</html>
