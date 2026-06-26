@@ -379,9 +379,9 @@
         ? { type:"image",    source:{ type:"base64", media_type:file.type,            data:b64 } }
         : { type:"document", source:{ type:"base64", media_type:"application/pdf",    data:b64 } };
 
-      const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      const resp = await fetch("https://cafe-proxy.onrender.com/scan", {
         method: "POST",
-        headers: { "Content-Type":"application/json", "x-api-key": ANTHROPIC_API_KEY, "anthropic-version":"2023-06-01" },
+        headers: { "Content-Type":"application/json", 
         body: JSON.stringify({
           model: "claude-sonnet-4-6", max_tokens: 1000,
           messages: [{ role:"user", content:[
